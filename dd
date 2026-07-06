@@ -1,0 +1,23 @@
+Mismo principio que ya vimos antes — te lo resumo rápido y concreto para estos tres específicamente:
+Los tres (03_ddl_schema.sql, 05_dml.sql, 06_consultas_negocio.sql) se escriben y se ejecutan en DBeaver. No necesitas VS Code para nada de esto.
+Por qué
+
+Son código SQL, no Python ni JavaScript
+DBeaver ya está conectado a tu MySQL, tiene resaltado de sintaxis, autocompletado de nombres de tabla/columna, y ejecuta directo contra la base de datos real
+VS Code no tiene una base de datos "adentro" — solo sirve para escribir texto, tendrías que copiar y pegar el resultado en otro lado para ejecutarlo (paso innecesario)
+
+Cómo hacerlo en DBeaver, paso a paso
+
+Clic derecho sobre tu conexión → SQL Editor → New SQL Script (o Ctrl + ])
+Escribes o pegas el código directamente ahí
+Para ejecutar todo el script de una vez (varias sentencias, como tu DDL con 8 CREATE TABLE): Alt + X o clic derecho → Execute SQL Script
+Para ejecutar solo una consulta (ej. una de las 6 de negocio, una por una): pones el cursor sobre esa sentencia y Ctrl + Enter
+
+Orden recomendado (3 pestañas separadas en DBeaver)
+
+Pestaña 1 → pegas 03_ddl_schema.sql → Alt+X → crea la base y las tablas
+Cargas los CSV con Import Data (como ya vimos)
+Pestaña 2 → pegas 05_dml.sql → ejecutas sentencia por sentencia con Ctrl+Enter (así ves el resultado de cada INSERT/UPDATE/DELETE por separado, útil para revisar que funcionó cada uno)
+Pestaña 3 → pegas 06_consultas_negocio.sql → ejecutas cada consulta con Ctrl+Enter y revisas el resultado en la grilla de abajo
+
+Regla simple para recordar en el examen: si el archivo termina en .sql → DBeaver. Si termina en .py → VS Code. Nunca se mezclan.

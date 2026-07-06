@@ -1,0 +1,95 @@
+-- =====================================================================
+-- DML — bd_jesus_villa_clan9
+-- =====================================================================
+USE bd_jesus_villa_clan9;
+
+-- =====================================================================
+-- INSERCIÓN
+-- =====================================================================
+
+-- Nuevo proveedor
+INSERT INTO rm_suppliers (supplier_name, tax_id, city_id, phone)
+VALUES ('Distribuciones El Roble S.A.S.', '9021234567',
+        (SELECT city_id FROM rm_cities WHERE city_name = 'Bogotá'),
+        '6017778899');
+
+-- Nueva categoría (equivalente a "marca" en este dominio, ya que el
+-- dataset no trae una columna de marca; se deja de ejemplo una nueva
+-- categoría de producto, que sigue el mismo patrón de catálogo maestro)
+INSERT INTO rm_categories (category_name)
+VALUES ('Iluminación');
+
+-- Nuevo producto asociado al proveedor recién creado
+-- (el proveedor no es FK directa de producto en este modelo: la relación
+--  proveedor-producto se materializa a través de rm_purchases, ya que
+--  un mismo producto puede comprarse a más de un proveedor)
+INSERT INTO rm_products (sku, product_name, description, category_id, unit_measure)
+VALUES ('SKU5001', 'Bombillo LED 12W', 'Bombillo LED luz blanca 12 vatios',
+        (SELECT category_id FROM rm_categories WHERE category_name = 'Iluminación'),
+        'Unidad');
+
+-- Compra de ejemplo que vincula al nuevo proveedor con el nuevo producto
+INSERT INTO rm_purchases (purchase_date, supplier_id, product_id, warehouse_id, quantity, unit_price)
+VALUES (CURDATE(),
+        (SELECT supplier_id FROM rm_suppliers WHERE tax_id = '9021234567'),
+        (SELECT product_id FROM rm_products WHERE sku = 'SKU5001'),
+        (SELECT warehouse_id FROM rm_warehouses LIMIT 1),
+        50, 9800);
+
+
+-- =====================================================================
+-- ACTUALIZACIÓN
+-- =====================================================================
+
+-- Teléfono de un proveedor
+UPDATE rm_suppliers
+SET phone = '6017770000'
+WHERE tax_id = '9021234567';
+
+-- Ciudad de una bodega
+UPDATE rm_warehouses
+SET city_id = (SELECT city_id FROM rm_cities WHERE city_name = 'Cartagena')
+WHERE warehouse_name = 'Centro Logistico Bogota';
+
+-- Precio unitario de un producto: como el precio vive en rm_purchases
+-- (por transacción, no por producto — ver documento de 3FN), la
+-- "actualización de precio de un producto" se interpreta como corregir
+-- el precio de su compra más reciente:
+UPDATE rm_purchases
+SET unit_price = 9500
+WHERE product_id = (SELECT product_id FROM rm_products WHERE sku = 'SKU5001')
+ORDER BY purchase_date DESC
+LIMIT 1;
+
+
+-- =====================================================================
+-- ELIMINACIÓN (con verificación de integridad referencial)
+-- =====================================================================
+
+-- Regla de negocio: solo se puede eliminar un producto si NO tiene
+-- compras registradas y NO tiene movimientos de inventario.
+-- Las FOREIGN KEY con ON DELETE RESTRICT en rm_purchases y rm_movements
+-- ya bloquean el DELETE automáticamente si existen registros hijos;
+-- aquí se muestra además la verificación explícita antes de intentarlo.
+
+-- Paso 1: identificar el producto a eliminar (ejemplo: el recién creado)
+SET @producto_a_eliminar = (SELECT product_id FROM rm_products WHERE sku = 'SKU5001');
+
+-- Paso 2: verificar dependencias
+SELECT
+    (SELECT COUNT(*) FROM rm_purchases WHERE product_id = @producto_a_eliminar) AS compras_asociadas,
+    (SELECT COUNT(*) FROM rm_movements WHERE product_id = @producto_a_eliminar) AS movimientos_asociados;
+
+-- Paso 3a: si compras_asociadas = 0 y movimientos_asociados = 0, se puede eliminar
+-- (en este ejemplo SKU5001 SÍ tiene una compra asociada del INSERT anterior,
+--  por lo que el DELETE fallará y demostrará la restricción de integridad)
+DELETE FROM rm_products WHERE product_id = @producto_a_eliminar;
+-- Resultado esperado: Error 1451 (23000): Cannot delete or update a parent row:
+-- a foreign key constraint fails (`rm_purchases`, CONSTRAINT `fk_purchases_product`)
+-- porque ON DELETE RESTRICT en rm_purchases.product_id lo impide.
+
+-- Paso 3b: para eliminarlo correctamente, primero se deben borrar (o nunca haber
+-- creado) sus movimientos y compras asociadas, y solo entonces el producto:
+-- DELETE FROM rm_movements WHERE product_id = @producto_a_eliminar;
+-- DELETE FROM rm_purchases WHERE product_id = @producto_a_eliminar;
+-- DELETE FROM rm_products WHERE product_id = @producto_a_eliminar;

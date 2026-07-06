@@ -1,0 +1,96 @@
+-- =====================================================================
+-- Carga de datos — bd_jesus_villa_clan9
+-- Requiere que el servidor tenga habilitado local_infile:
+--   SET GLOBAL local_infile = 1;
+-- y que el cliente se conecte con: mysql --local-infile=1 -u usuario -p
+--
+-- Coloca los 8 archivos CSV (carpeta csv_clean/) en una ruta accesible
+-- por el servidor, o usa LOAD DATA LOCAL INFILE como aquí (lee desde
+-- la máquina cliente, no requiere permisos de archivo del servidor).
+-- Ajusta la ruta '/ruta/a/csv_clean/' según tu entorno.
+-- =====================================================================
+
+USE bd_jesus_villa_clan9;
+
+-- El orden de carga respeta las dependencias de FOREIGN KEY:
+-- primero catálogos independientes, luego entidades que dependen de ellos,
+-- y al final las tablas transaccionales.
+
+-- 1) rm_cities
+LOAD DATA LOCAL INFILE '/ruta/a/csv_clean/rm_cities.csv'
+INTO TABLE rm_cities
+FIELDS TERMINATED BY ',' ENCLOSED BY '"'
+LINES TERMINATED BY '\n'
+IGNORE 1 ROWS
+(city_id, city_name);
+
+-- 2) rm_categories
+LOAD DATA LOCAL INFILE '/ruta/a/csv_clean/rm_categories.csv'
+INTO TABLE rm_categories
+FIELDS TERMINATED BY ',' ENCLOSED BY '"'
+LINES TERMINATED BY '\n'
+IGNORE 1 ROWS
+(category_id, category_name);
+
+-- 3) rm_suppliers (depende de rm_cities)
+LOAD DATA LOCAL INFILE '/ruta/a/csv_clean/rm_suppliers.csv'
+INTO TABLE rm_suppliers
+FIELDS TERMINATED BY ',' ENCLOSED BY '"'
+LINES TERMINATED BY '\n'
+IGNORE 1 ROWS
+(supplier_id, supplier_name, tax_id, city_id, phone);
+
+-- 4) rm_warehouses (depende de rm_cities)
+LOAD DATA LOCAL INFILE '/ruta/a/csv_clean/rm_warehouses.csv'
+INTO TABLE rm_warehouses
+FIELDS TERMINATED BY ',' ENCLOSED BY '"'
+LINES TERMINATED BY '\n'
+IGNORE 1 ROWS
+(warehouse_id, warehouse_name, city_id, address);
+
+-- 5) rm_products (depende de rm_categories)
+LOAD DATA LOCAL INFILE '/ruta/a/csv_clean/rm_products.csv'
+INTO TABLE rm_products
+FIELDS TERMINATED BY ',' ENCLOSED BY '"'
+LINES TERMINATED BY '\n'
+IGNORE 1 ROWS
+(product_id, sku, product_name, description, category_id, unit_measure);
+
+-- 6) rm_employees
+LOAD DATA LOCAL INFILE '/ruta/a/csv_clean/rm_employees.csv'
+INTO TABLE rm_employees
+FIELDS TERMINATED BY ',' ENCLOSED BY '"'
+LINES TERMINATED BY '\n'
+IGNORE 1 ROWS
+(employee_id, full_name);
+
+-- 7) rm_purchases (depende de suppliers, products, warehouses)
+LOAD DATA LOCAL INFILE '/ruta/a/csv_clean/rm_purchases.csv'
+INTO TABLE rm_purchases
+FIELDS TERMINATED BY ',' ENCLOSED BY '"'
+LINES TERMINATED BY '\n'
+IGNORE 1 ROWS
+(purchase_id, purchase_date, supplier_id, product_id, warehouse_id, quantity, unit_price);
+
+-- 8) rm_movements (depende de products, warehouses, employees, purchases)
+--    purchase_id puede venir vacío en el CSV -> se transforma a NULL con @variable
+LOAD DATA LOCAL INFILE '/ruta/a/csv_clean/rm_movements.csv'
+INTO TABLE rm_movements
+FIELDS TERMINATED BY ',' ENCLOSED BY '"'
+LINES TERMINATED BY '\n'
+IGNORE 1 ROWS
+(movement_id, movement_code, movement_type, movement_date, product_id, warehouse_id,
+ quantity, stock_after, employee_id, @purchase_id, @observations)
+SET
+    purchase_id  = NULLIF(@purchase_id, ''),
+    observations = NULLIF(@observations, '');
+
+-- Verificación rápida de conteos cargados
+SELECT 'rm_cities' AS tabla, COUNT(*) AS filas FROM rm_cities
+UNION ALL SELECT 'rm_categories', COUNT(*) FROM rm_categories
+UNION ALL SELECT 'rm_suppliers', COUNT(*) FROM rm_suppliers
+UNION ALL SELECT 'rm_warehouses', COUNT(*) FROM rm_warehouses
+UNION ALL SELECT 'rm_products', COUNT(*) FROM rm_products
+UNION ALL SELECT 'rm_employees', COUNT(*) FROM rm_employees
+UNION ALL SELECT 'rm_purchases', COUNT(*) FROM rm_purchases
+UNION ALL SELECT 'rm_movements', COUNT(*) FROM rm_movements;

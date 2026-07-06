@@ -1,0 +1,110 @@
+# Análisis de Calidad de Datos — RiwiMarket S.A.S.
+
+**Archivo fuente:** `raw_dataset_riwibuild_practice.csv`
+**Dimensiones:** 80 registros × 25 columnas (tabla plana, sin normalizar)
+
+## 1. Problemas encontrados
+
+### 1.1 Proveedores duplicados con código distinto
+El mismo proveedor real aparece registrado con **dos códigos diferentes**, nombre con variaciones de formato, NIT en dos formatos y ciudad con distinta capitalización:
+
+| Código | Nombre registrado | NIT | Ciudad |
+|---|---|---|---|
+| S-001 | Ferreteria Andina SAS | 900111222-1 | Bogotá / BOGOTÁ |
+| S-002 | Ferretería Andina S.A.S. | 9001112221 | BOGOTA D.C. / Bogota D.C. |
+| S-003 | Aceros del Norte Ltda | 901333444-5 | Barranquilla |
+| S-004 | Aceros Del Norte LTDA. | 9013334445 | B/quilla / B/QUILLA |
+| S-005 | TecnoTornillos Colombia | — | Medellín / MEDELLÍN |
+| S-006 | Tecno Tornillos Col. | 9017778882 | Medellin / MEDELLIN |
+| S-007 | Pinturas Caribe S.A. | — | Cartagena |
+| S-008 | Pinturas Caribe SA | 9009991113 | Cartagena de Indias |
+
+**Causa probable:** distintas personas del área de Compras registraron al mismo proveedor por su cuenta, sin validar si ya existía, y cada una tecleó el nombre/NIT/teléfono a su manera.
+**Impacto:** el gasto real por proveedor queda dividido entre dos códigos, lo que subestima el total comprado a cada uno y rompe cualquier reporte financiero por proveedor (afecta directamente la Consulta 3 del enunciado).
+
+### 1.2 Bodegas duplicadas con código distinto
+El mismo patrón se repite en bodegas — mismo sitio físico con dos códigos (con y sin guion):
+
+| Código | Nombre | Ciudad | Dirección |
+|---|---|---|---|
+| WH-BAQ-01 / WH-BAQ1 | Bodega Principal / Ppal. Barranquilla | Barranquilla / B/quilla | "Via 40 # 72-10" / "Vía 40 72 10" |
+| WH-MED-01 / WH-MED1 | Bodega Medellín Sur | Medellín / Medellin | "Cra 50 # 10-20" / "Carrera 50 10 20" |
+| WH-BOG-01 / WH-BOG1 | Centro Logístico Bogotá | Bogotá / Bogota D.C. | "Calle 80 # 90-15" / "Cl 80 90 15" |
+
+**Impacto:** el stock e inventario real de una sola bodega queda repartido en dos filas de "bodega", afectando directamente la Consulta 2 y la Consulta 6 (valor de inventario por ciudad).
+
+### 1.3 Productos duplicados por variación de SKU
+El mismo producto físico aparece con el SKU escrito con y sin guion, y con nombre/descripción ligeramente distintos:
+
+- `SKU-1001` / `SKU1001` → Taladro industrial 1/2 pulg.
+- `SKU-1002` / `SKU1002` → Broca acero 8mm
+- `SKU-2001` / `SKU2001` → Cemento gris 50kg
+- `SKU-3001` / `SKU3001` → Pintura vinilo blanco 5gl
+- `SKU-4001` / `SKU4001` → Casco de seguridad amarillo
+
+**Causa probable:** falta de un catálogo maestro de productos; cada compra se digitó "a mano" copiando el SKU de memoria o de una factura física.
+**Impacto:** las existencias de un mismo producto quedan divididas entre dos SKU, distorsionando la Consulta 1 (inventario disponible) y la Consulta 5 (productos más comprados).
+
+### 1.4 Categorías escritas de formas distintas
+Una sola categoría real aparece hasta con 3 variantes de texto:
+
+- "Seguridad Industrial" / "Seguridad Ind." (13 + 8 filas)
+- "Accesorios" / "accesorios" / "Accesorios " *(con espacio final)* (10 + 1 + 3 filas)
+- "pintura" / "Pinturas" / "pinturas" (10 + 9 + 1 filas)
+- "Materiales de Construcción" / "materiales construcción" (7 + 7 filas)
+- "herramientas" / "Herramientas" (9 + 1 filas)
+
+**Impacto:** cualquier `GROUP BY categoria` reporta hasta el doble de categorías de las que realmente existen.
+
+### 1.5 Unidad de medida sin estandarizar
+La misma unidad se escribe de dos formas (código corto vs. nombre completo):
+
+- `UND` / `Unidad` (27 + 19 filas)
+- `CUN` / `Cuñete` (10 + 10 filas)
+- `Bulto` (14 filas, sin variante — consistente)
+
+### 1.6 Formatos de teléfono inconsistentes
+`(601)5550101`, `601 555 0101`, `605-333-2222`, `3332222` (sin indicativo) — no hay un formato único, lo que impide validar longitud o unicidad del dato.
+
+### 1.7 `purchase_code` no es un identificador confiable
+- **6 filas** tienen `purchase_code` vacío. Al revisarlas, **todas** corresponden a movimientos `OUT`, `ADJUSTMENT_IN` o `ADJUSTMENT_OUT` — es decir, movimientos de bodega que **no nacen de una compra** (salidas y ajustes de inventario). Esto en realidad es correcto a nivel de negocio: no todo movimiento de inventario proviene de una compra.
+- Más grave: el **mismo `purchase_code`** (ej. `PO-2026-022`, `PO-2026-005`) aparece asociado a **varios proveedores distintos y varias fechas distintas**. Esto indica que el número de orden de compra se reutilizó por error entre compras diferentes — un problema de integridad, no solo de formato.
+- **Causa probable:** el número de orden se digitaba manualmente en el Excel compartido, sin un contador centralizado ni validación de unicidad.
+- **Impacto:** no se puede confiar en `purchase_code` como clave de una "orden de compra"; el modelo relacional debe generar sus propias claves (`purchase_id`, `movement_id`) en vez de reutilizar este campo como PK.
+
+### 1.8 Precio unitario inconsistente para el mismo producto
+El precio (`unit_price`) varía entre filas del mismo SKU (ej. Cemento gris: 37.700 / 38.000 / 39.000). Esto **no es necesariamente un error**: es normal que el precio de compra cambie con el tiempo o el proveedor. Por eso el precio **no debe vivir en la tabla de producto** (sería una dependencia transitiva incorrecta), sino en la tabla de compras, como el precio pactado en *esa* transacción puntual.
+
+### 1.9 Valores nulos
+| Columna | Nulos | Motivo |
+|---|---|---|
+| `purchase_code` | 6 | Movimientos sin compra asociada (ver 1.7) |
+| `purchased_quantity` | 10 | Dato faltante en captura (marcado por la propia empresa como "Missing purchase quantity" en 18 filas, aunque solo 10 quedaron realmente vacías — el resto ya traía un valor a pesar de la observación, lo que sugiere que la corrección fue parcial) |
+| `observations` | 29 | Campo opcional de notas, es normal que esté vacío |
+
+### 1.10 Columna "observations" ya documenta el problema
+Es interesante notar que el propio archivo trae una columna `observations` con etiquetas como *"Duplicated supplier name"*, *"City format inconsistent"*, *"Missing purchase quantity"*, *"Review price"* — es decir, alguien en la empresa ya había detectado manualmente estos mismos problemas fila por fila, pero nunca se corrigieron en el origen. Esto confirma el diagnóstico del enunciado: el archivo compartido no tiene control de calidad ni una fuente única de verdad.
+
+### 1.11 Dependencias funcionales detectadas (clave para la normalización)
+- `supplier_code → supplier_name, supplier_tax_id, supplier_city, supplier_phone`
+- `warehouse_code → warehouse_name, warehouse_city, warehouse_address`
+- `product_sku → product_name, product_description, category_name, unit_measure` (pero **no** `unit_price`, que depende de la transacción)
+- `category_name` es una dependencia transitiva dentro de producto → debe salir a su propia entidad `categories`
+- `movement_code → movement_type, movement_date, movement_quantity, stock_after_movement` y depende también de `product_sku` + `warehouse_code` (a qué producto y bodega afecta)
+- `purchase_code` (una vez regenerado como clave propia) depende de `supplier_code`, `purchase_date`, y sus líneas dependen además de `product_sku` y `purchased_quantity`
+
+## 2. Impacto sobre el negocio
+
+- **Compras:** el total invertido por proveedor y el ranking de productos más comprados quedan incorrectos mientras existan códigos duplicados.
+- **Logística:** el inventario por bodega/ciudad no refleja la realidad si la misma bodega física está partida en dos códigos.
+- **Abastecimiento:** los productos "próximos a agotarse" pueden pasar desapercibidos si su stock está repartido entre dos SKU.
+- **Confianza:** ningún reporte generado desde este archivo es auditable ni reproducible, porque dos personas pueden llegar a números distintos según qué variante de nombre usaron en sus tablas dinámicas.
+
+## 3. Propuesta de solución
+
+1. Normalizar el modelo hasta 3FN, separando en entidades independientes: `suppliers`, `warehouses`, `products`, `categories`, `cities`, `purchases`, `purchase_lines`/`movements`, `employees` (responsables).
+2. Definir un **catálogo maestro único** por entidad (un solo código por proveedor, bodega y producto real), consolidando los duplicados detectados arriba antes de la carga.
+3. Aplicar `UNIQUE` sobre los campos de negocio que deben ser irrepetibles (NIT de proveedor, SKU de producto, código de bodega) para que la base de datos impida a futuro el mismo error que el Excel permitió.
+4. Estandarizar catálogos cerrados (categoría, unidad de medida, tipo de movimiento) como tablas de referencia o `CHECK` con lista fija de valores, en vez de texto libre.
+5. Generar las claves de compra y movimiento en la propia base de datos (autoincremental), sin depender del `purchase_code` original del Excel.
+6. Mover `unit_price` al nivel de la transacción de compra, no al producto, respetando que el precio cambia en el tiempo.

@@ -1,0 +1,55 @@
+# Normalización — RiwiMarket S.A.S.
+
+## Primera Forma Normal (1FN)
+
+**Estructura inicial:** una única tabla plana de 25 columnas donde cada fila mezclaba datos de proveedor, bodega, producto, compra y movimiento de inventario al mismo tiempo (ver `raw_dataset_riwibuild_practice.csv`).
+
+**Atributos que violaban 1FN:**
+- No había repetición de grupos multivaluados dentro de una celda (no había listas separadas por comas), así que a nivel de "átomo por celda" el archivo ya cumplía parcialmente. El verdadero problema de 1FN era la **mezcla de distintos temas de negocio en una sola tabla**: proveedor, bodega, producto y movimiento no son la misma entidad y no debían compartir fila.
+- Además, columnas como `supplier_city`/`warehouse_city` repetían el mismo dato (nombre de ciudad) en cada fila donde aparecía ese proveedor o bodega, generando redundancia — síntoma de que esas columnas dependían de una entidad distinta a la fila completa.
+
+**Cambios realizados:**
+- Se separó la tabla única en entidades atómicas independientes: `rm_cities`, `rm_categories`, `rm_suppliers`, `rm_warehouses`, `rm_products`, `rm_employees`, `rm_purchases`, `rm_movements`.
+- Cada tabla tiene una clave primaria única y todos sus atributos son atómicos (un valor por celda).
+
+## Segunda Forma Normal (2FN)
+
+2FN aplica sobre claves compuestas: ninguna columna no-clave puede depender solo de una parte de la clave.
+
+**Dependencias parciales encontradas (en la tabla plana original):**
+- Si se hubiera usado como clave compuesta `(product_sku, warehouse_code)` para representar "existencias", columnas como `product_name`, `category_name` o `unit_measure` dependían **solo** de `product_sku`, no de la bodega — es decir, dependían de una parte de esa clave compuesta, no de toda ella.
+- Igualmente, `supplier_name`, `supplier_city`, `supplier_phone` dependían solo de `supplier_code`, no de la combinación `(supplier_code, purchase_date)` que identificaría una compra.
+
+**Cómo fueron eliminadas:**
+- Se creó la entidad `rm_products` donde `product_name`, `product_description`, `category_id`, `unit_measure` dependen únicamente de `product_id` (clave simple, no compuesta).
+- Se creó `rm_suppliers` donde todos los atributos del proveedor dependen únicamente de `supplier_id`.
+- Lo mismo para `rm_warehouses` (depende solo de `warehouse_id`).
+
+**Nuevas entidades creadas:** `rm_products`, `rm_suppliers`, `rm_warehouses`, `rm_employees`.
+
+## Tercera Forma Normal (3FN)
+
+3FN exige que los atributos no-clave dependan **únicamente** de la clave primaria, y no de otro atributo no-clave (dependencia transitiva).
+
+**Dependencias transitivas encontradas:**
+- En la tabla plana: `product_sku → category_name` y a su vez `category_name` no depende de nada más — pero al vivir dentro de la fila de producto, cualquier cambio de categoría obligaba a actualizar N filas repetidas. Es una dependencia transitiva vía `category_name`, que debía ser su propia entidad.
+- `supplier_code → supplier_city → (implícitamente ninguna otra columna adicional de la ciudad, pero el nombre de ciudad se repetía igual para proveedores y bodegas ubicados en el mismo sitio)` — el nombre de ciudad es un atributo independiente que no depende del proveedor ni de la bodega, sino de sí mismo. Por eso se extrajo a `rm_cities`.
+- `unit_price` **no** es una dependencia transitiva de `product_sku`: el precio cambia según la transacción (proveedor, fecha, negociación puntual), por lo que **debe vivir en `rm_purchases`**, nunca en `rm_products`. Dejarlo en producto habría sido precisamente el tipo de dependencia transitiva/incorrecta que 3FN prohíbe (el precio "actual" dependería de cuál fue la última fila cargada, no de una regla de negocio real).
+
+**Cómo fueron eliminadas:**
+- Se creó `rm_categories` (categoría vive independiente, referenciada por FK desde `rm_products`).
+- Se creó `rm_cities` (ciudad vive independiente, referenciada por FK desde `rm_suppliers` y `rm_warehouses`).
+- `unit_price` se dejó exclusivamente en `rm_purchases`, ligado a la transacción de compra específica.
+
+**Resultado final obtenido:** modelo en 3FN con 8 entidades, sin redundancia de datos maestros, sin dependencias parciales ni transitivas, y con integridad referencial garantizada por FOREIGN KEY:
+
+```
+rm_cities        (independiente)
+rm_categories     (independiente)
+rm_suppliers      → rm_cities
+rm_warehouses     → rm_cities
+rm_products       → rm_categories
+rm_employees      (independiente)
+rm_purchases      → rm_suppliers, rm_products, rm_warehouses
+rm_movements      → rm_products, rm_warehouses, rm_employees, rm_purchases (opcional)
+```

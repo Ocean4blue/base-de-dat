@@ -1,0 +1,151 @@
+-- =====================================================================
+-- RiwiMarket S.A.S. — Modelo Relacional (3FN)
+-- Base de datos: bd_jesus_villa_clan9
+-- Motor: MySQL 8.x
+-- =====================================================================
+
+DROP DATABASE IF EXISTS bd_jesus_villa_clan9;
+CREATE DATABASE bd_jesus_villa_clan9
+    CHARACTER SET utf8mb4
+    COLLATE utf8mb4_unicode_ci;
+
+USE bd_jesus_villa_clan9;
+
+-- ---------------------------------------------------------------------
+-- rm_cities: catálogo único de ciudades (elimina variantes de escritura)
+-- ---------------------------------------------------------------------
+CREATE TABLE rm_cities (
+    city_id     INT AUTO_INCREMENT PRIMARY KEY,
+    city_name   VARCHAR(100) NOT NULL UNIQUE
+);
+
+-- ---------------------------------------------------------------------
+-- rm_categories: catálogo único de categorías de producto
+-- ---------------------------------------------------------------------
+CREATE TABLE rm_categories (
+    category_id     INT AUTO_INCREMENT PRIMARY KEY,
+    category_name   VARCHAR(100) NOT NULL UNIQUE
+);
+
+-- ---------------------------------------------------------------------
+-- rm_suppliers: un solo registro por proveedor real (deduplicado por NIT)
+-- ---------------------------------------------------------------------
+CREATE TABLE rm_suppliers (
+    supplier_id     INT AUTO_INCREMENT PRIMARY KEY,
+    supplier_name   VARCHAR(150) NOT NULL,
+    tax_id          VARCHAR(20)  NOT NULL UNIQUE,
+    city_id         INT NOT NULL,
+    phone           VARCHAR(20)  NOT NULL,
+    CONSTRAINT fk_suppliers_city
+        FOREIGN KEY (city_id) REFERENCES rm_cities(city_id)
+        ON DELETE RESTRICT
+        ON UPDATE CASCADE,
+    CONSTRAINT chk_supplier_phone_len CHECK (CHAR_LENGTH(phone) >= 7)
+);
+
+-- ---------------------------------------------------------------------
+-- rm_warehouses: un solo registro por bodega física real
+-- ---------------------------------------------------------------------
+CREATE TABLE rm_warehouses (
+    warehouse_id    INT AUTO_INCREMENT PRIMARY KEY,
+    warehouse_name  VARCHAR(150) NOT NULL,
+    city_id         INT NOT NULL,
+    address         VARCHAR(200) NOT NULL,
+    CONSTRAINT fk_warehouses_city
+        FOREIGN KEY (city_id) REFERENCES rm_cities(city_id)
+        ON DELETE RESTRICT
+        ON UPDATE CASCADE
+);
+
+-- ---------------------------------------------------------------------
+-- rm_products: catálogo maestro único de productos (deduplicado por SKU)
+-- unit_price NO vive aquí (ver 3FN) — vive en rm_purchases
+-- ---------------------------------------------------------------------
+CREATE TABLE rm_products (
+    product_id      INT AUTO_INCREMENT PRIMARY KEY,
+    sku             VARCHAR(30)  NOT NULL UNIQUE,
+    product_name    VARCHAR(150) NOT NULL,
+    description     VARCHAR(255) NOT NULL,
+    category_id     INT NOT NULL,
+    unit_measure    VARCHAR(20)  NOT NULL,
+    CONSTRAINT fk_products_category
+        FOREIGN KEY (category_id) REFERENCES rm_categories(category_id)
+        ON DELETE RESTRICT
+        ON UPDATE CASCADE,
+    CONSTRAINT chk_unit_measure
+        CHECK (unit_measure IN ('Unidad','Bulto','Cuñete'))
+);
+
+-- ---------------------------------------------------------------------
+-- rm_employees: empleados responsables de compras/movimientos
+-- ---------------------------------------------------------------------
+CREATE TABLE rm_employees (
+    employee_id     INT AUTO_INCREMENT PRIMARY KEY,
+    full_name       VARCHAR(150) NOT NULL UNIQUE
+);
+
+-- ---------------------------------------------------------------------
+-- rm_purchases: una fila por línea de compra (producto + proveedor + bodega)
+-- unit_price se registra aquí porque depende de la transacción, no del producto
+-- ---------------------------------------------------------------------
+CREATE TABLE rm_purchases (
+    purchase_id     INT AUTO_INCREMENT PRIMARY KEY,
+    purchase_date   DATE NOT NULL,
+    supplier_id     INT NOT NULL,
+    product_id      INT NOT NULL,
+    warehouse_id    INT NOT NULL,
+    quantity        DECIMAL(10,2) NOT NULL CHECK (quantity > 0),
+    unit_price      DECIMAL(12,2) NOT NULL CHECK (unit_price > 0),
+    CONSTRAINT fk_purchases_supplier
+        FOREIGN KEY (supplier_id) REFERENCES rm_suppliers(supplier_id)
+        ON DELETE RESTRICT
+        ON UPDATE CASCADE,
+    CONSTRAINT fk_purchases_product
+        FOREIGN KEY (product_id) REFERENCES rm_products(product_id)
+        ON DELETE RESTRICT
+        ON UPDATE CASCADE,
+    CONSTRAINT fk_purchases_warehouse
+        FOREIGN KEY (warehouse_id) REFERENCES rm_warehouses(warehouse_id)
+        ON DELETE RESTRICT
+        ON UPDATE CASCADE
+);
+
+-- ---------------------------------------------------------------------
+-- rm_movements: todos los movimientos de inventario (IN/OUT/ajustes)
+-- purchase_id es NULL cuando el movimiento no proviene de una compra
+-- (salidas de venta, ajustes de inventario)
+-- ---------------------------------------------------------------------
+CREATE TABLE rm_movements (
+    movement_id         INT AUTO_INCREMENT PRIMARY KEY,
+    movement_code       VARCHAR(20) NOT NULL UNIQUE,
+    movement_type       VARCHAR(20) NOT NULL
+        CHECK (movement_type IN ('IN','OUT','ADJUSTMENT_IN','ADJUSTMENT_OUT')),
+    movement_date       DATE NOT NULL,
+    product_id          INT NOT NULL,
+    warehouse_id        INT NOT NULL,
+    quantity            DECIMAL(10,2) NOT NULL CHECK (quantity > 0),
+    stock_after         DECIMAL(10,2) NOT NULL CHECK (stock_after >= 0),
+    employee_id         INT NOT NULL,
+    purchase_id         INT NULL,
+    observations        VARCHAR(255) NULL,
+    CONSTRAINT fk_movements_product
+        FOREIGN KEY (product_id) REFERENCES rm_products(product_id)
+        ON DELETE RESTRICT
+        ON UPDATE CASCADE,
+    CONSTRAINT fk_movements_warehouse
+        FOREIGN KEY (warehouse_id) REFERENCES rm_warehouses(warehouse_id)
+        ON DELETE RESTRICT
+        ON UPDATE CASCADE,
+    CONSTRAINT fk_movements_employee
+        FOREIGN KEY (employee_id) REFERENCES rm_employees(employee_id)
+        ON DELETE RESTRICT
+        ON UPDATE CASCADE,
+    CONSTRAINT fk_movements_purchase
+        FOREIGN KEY (purchase_id) REFERENCES rm_purchases(purchase_id)
+        ON DELETE SET NULL
+        ON UPDATE CASCADE
+);
+
+-- Índices adicionales para acelerar las consultas de negocio
+CREATE INDEX idx_movements_product_wh ON rm_movements(product_id, warehouse_id);
+CREATE INDEX idx_purchases_supplier ON rm_purchases(supplier_id);
